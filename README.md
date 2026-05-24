@@ -100,9 +100,51 @@ python futures_seat_tracker/main.py parse --exchange shfe --file "/path/to/file.
 - `FST_WEB_HOST`
 - `FST_WEB_PORT`
 
-## 更新方式
+## 服务器首次部署
 
-推荐使用 git 管理 `app/` 里的代码，`data/` 和 `logs/` 不进入 git。
+服务器目录结构：
+
+```text
+/opt/futures_seat_tracker/
+  app/   # git 仓库
+  data/  # 数据库、raw、parsed，不进 git
+  logs/  # 日志，不进 git
+```
+
+在服务器上执行：
+
+```bash
+mkdir -p /opt/futures_seat_tracker/app /opt/futures_seat_tracker/data /opt/futures_seat_tracker/logs
+git clone https://github.com/2682408256/futures_seat_tracker_deploy.git /opt/futures_seat_tracker/app
+cd /opt/futures_seat_tracker/app
+python3 -m pip install -r requirements.txt
+```
+
+如果你要沿用 Windows 本地已有数据，把本地的 `futures_seat_tracker_deploy/data/` 上传到服务器：
+
+```bash
+scp -P 47807 -r C:\Users\kk\.claude\skills\futures_seat_tracker_deploy\data\* root@103.236.96.82:/opt/futures_seat_tracker/data/
+```
+
+## systemd 常驻服务
+
+在服务器上执行：
+
+```bash
+cd /opt/futures_seat_tracker/app
+cp deploy/futures-seat-tracker.service /etc/systemd/system/futures-seat-tracker.service
+systemctl daemon-reload
+systemctl enable --now futures-seat-tracker
+systemctl status futures-seat-tracker
+```
+
+服务启动后访问：
+
+```text
+http://服务器IP:5000
+```
+
+## 后续更新
 
 Windows 本地开发：
 
@@ -117,15 +159,8 @@ Linux 服务器更新：
 ```bash
 cd /opt/futures_seat_tracker/app
 git pull
-./start.sh
-```
-
-如果后续配置了 `systemd`，更新后改为：
-
-```bash
-cd /opt/futures_seat_tracker/app
-git pull
 systemctl restart futures-seat-tracker
+systemctl status futures-seat-tracker
 ```
 
 注意：

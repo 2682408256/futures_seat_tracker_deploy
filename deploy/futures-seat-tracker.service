@@ -1,0 +1,19 @@
+[Unit]
+Description=Futures Seat Tracker Web Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/futures_seat_tracker/app
+Environment=FST_OUTPUTS_DIR=/opt/futures_seat_tracker/data
+Environment=FST_LOGS_DIR=/opt/futures_seat_tracker/logs
+Environment=FST_DB_PATH=/opt/futures_seat_tracker/data/seat_tracker.sqlite3
+Environment=FST_WEB_HOST=0.0.0.0
+Environment=FST_WEB_PORT=5000
+ExecStart=/usr/bin/bash /opt/futures_seat_tracker/app/start.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
