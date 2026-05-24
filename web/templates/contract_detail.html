@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ detail.product_name }} {{ detail.contract_code }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --line: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --red: #d92d20;
+      --red-soft: #fff1f1;
+      --green: #16a34a;
+      --green-soft: #f0fdf4;
+      --accent: #ef4444;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: linear-gradient(180deg, #fff7f7 0%, var(--bg) 220px);
+      color: var(--text);
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #7f1d1d 0%, #ef4444 55%, #f97316 100%);
+      color: #fff;
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .hero-top {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .link-button {
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(6px);
+    }
+    .link-button.disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+    }
+    .hero-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+    .hero-form {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .hero-form select {
+      min-width: 180px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 0;
+      background: #fff;
+      color: var(--text);
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid rgba(239, 68, 68, 0.10);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 360px;
+    }
+    th, td {
+      padding: 13px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      background: #fcfcfd;
+    }
+    tbody tr:hover {
+      background: #fff7f7;
+    }
+    .summary-row th {
+      font-weight: 800;
+      background: #fafafa;
+    }
+    .positive {
+      color: var(--red);
+      font-weight: 700;
+      background: var(--red-soft);
+      border-radius: 10px;
+    }
+    .negative {
+      color: var(--green);
+      font-weight: 700;
+      background: var(--green-soft);
+      border-radius: 10px;
+    }
+    .neutral {
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .num {
+      display: inline-block;
+      min-width: 72px;
+      padding: 4px 8px;
+      text-align: right;
+    }
+    .chart-card {
+      background: linear-gradient(180deg, #ffffff 0%, #fff8f8 100%);
+    }
+    .chart-wrap {
+      width: 100%;
+      max-width: 920px;
+      height: 360px;
+      margin: 0 auto;
+    }
+    .range-control {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 0 4px;
+    }
+    .range-control span {
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    #range-label-start { min-width: 80px; text-align: right; }
+    #range-label-end { min-width: 80px; }
+    .range-track {
+      position: relative;
+      flex: 1;
+      height: 40px;
+    }
+    #range-start, #range-end {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 100%;
+      height: 6px;
+      -webkit-appearance: none;
+      background: transparent;
+      pointer-events: none;
+    }
+    #range-start::-webkit-slider-runnable-track,
+    #range-end::-webkit-slider-runnable-track {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--line);
+    }
+    #range-start::-webkit-slider-thumb,
+    #range-end::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--red);
+      cursor: pointer;
+      pointer-events: auto;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .range-fill {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      height: 6px;
+      border-radius: 999px;
+      background: #d92d20;
+      pointer-events: none;
+    }
+    button#range-reset {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .muted {
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        padding: 14px 12px 28px;
+      }
+      .hero {
+        border-radius: 18px;
+        padding: 16px;
+      }
+      .hero h1 {
+        font-size: 24px;
+      }
+      .hero-form {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .hero-form select {
+        width: 100%;
+      }
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        padding: 14px;
+        border-radius: 16px;
+      }
+      table {
+        min-width: 320px;
+      }
+      .num {
+        min-width: 60px;
+      }
+      .chart-wrap {
+        height: 260px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="hero-top">
+        <a class="link-button" href="/">返回首页</a>
+        {% if detail.previous_item %}
+        <a class="link-button" href="/contract/{{ detail.previous_item.exchange }}/{{ detail.previous_item.product_code }}?date={{ detail.previous_item.trade_date }}">上一个合约</a>
+        {% else %}
+        <span class="link-button disabled">上一个合约</span>
+        {% endif %}
+        {% if detail.next_item %}
+        <a class="link-button" href="/contract/{{ detail.next_item.exchange }}/{{ detail.next_item.product_code }}?date={{ detail.next_item.trade_date }}">下一个合约</a>
+        {% else %}
+        <span class="link-button disabled">下一个合约</span>
+        {% endif %}
+      </div>
+
+      <h1>{{ detail.product_name }} {{ detail.contract_code }}</h1>
+      <div class="hero-meta">
+        <span class="pill">交易日：{{ detail.trade_date }}</span>
+        <span class="pill">加权合约：{{ detail.weighted_placeholder }}</span>
+      </div>
+      <form method="get" class="hero-form">
+        <label for="date-select">切换日期</label>
+        <select id="date-select" name="date" onchange="this.form.submit()">
+          {% for date in detail.available_dates %}
+          <option value="{{ date }}" {% if date == detail.trade_date %}selected{% endif %}>{{ date }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>机构阵营</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>席位</th>
+                <th>净持仓</th>
+                <th>净变化</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in detail.institutional_rows %}
+              <tr>
+                <td>{{ row.member_label }}</td>
+                <td>
+                  <span class="num {% if row.net_position > 0 %}positive{% elif row.net_position < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ row.net_position }}
+                  </span>
+                </td>
+                <td>
+                  <span class="num {% if row.net_change > 0 %}positive{% elif row.net_change < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ row.net_change }}
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+              <tr class="summary-row">
+                <th>总计</th>
+                <th>
+                  {% set institutional_total_position = detail.institutional_rows | sum(attribute='net_position') %}
+                  <span class="num {% if institutional_total_position > 0 %}positive{% elif institutional_total_position < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ institutional_total_position }}
+                  </span>
+                </th>
+                <th>
+                  {% set institutional_total_change = detail.institutional_rows | sum(attribute='net_change') %}
+                  <span class="num {% if institutional_total_change > 0 %}positive{% elif institutional_total_change < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ institutional_total_change }}
+                  </span>
+                </th>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>散户阵营</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>席位</th>
+                <th>净持仓</th>
+                <th>净变化</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in detail.retail_rows %}
+              <tr>
+                <td>{{ row.member_label }}</td>
+                <td>
+                  <span class="num {% if row.net_position > 0 %}positive{% elif row.net_position < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ row.net_position }}
+                  </span>
+                </td>
+                <td>
+                  <span class="num {% if row.net_change > 0 %}positive{% elif row.net_change < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ row.net_change }}
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+              <tr class="summary-row">
+                <th>总计</th>
+                <th>
+                  {% set retail_total_position = detail.retail_rows | sum(attribute='net_position') %}
+                  <span class="num {% if retail_total_position > 0 %}positive{% elif retail_total_position < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ retail_total_position }}
+                  </span>
+                </th>
+                <th>
+                  {% set retail_total_change = detail.retail_rows | sum(attribute='net_change') %}
+                  <span class="num {% if retail_total_change > 0 %}positive{% elif retail_total_change < 0 %}negative{% else %}neutral{% endif %}">
+                    {{ retail_total_change }}
+                  </span>
+                </th>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel chart-card">
+      <h2>净持仓折线图</h2>
+      <div class="chart-wrap">
+        <canvas id="netChart"></canvas>
+      </div>
+      <div class="range-control">
+        <span id="range-label-start"></span>
+        <div class="range-track" id="range-track">
+          <input type="range" id="range-start" min="0" max="0" value="0">
+          <input type="range" id="range-end" min="0" max="0" value="0">
+        </div>
+        <span id="range-label-end"></span>
+        <button id="range-reset">重置</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>最近主力切换</h2>
+      {% if detail.switches %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>前一日</th>
+              <th>当前日</th>
+              <th>旧主力</th>
+              <th>新主力</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in detail.switches %}
+            <tr>
+              <td>{{ item.prev_trade_date }}</td>
+              <td>{{ item.trade_date }}</td>
+              <td>{{ item.prev_contract_code }}</td>
+              <td>{{ item.next_contract_code }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">当前样本下暂无主力切换记录。</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <script>
+    const rawLabels = {{ detail.institutional_series | map(attribute='trade_date') | list | tojson }};
+    const institutionalData = {{ detail.institutional_series | map(attribute='net_position') | list | tojson }};
+    const institutionalExcludingDongzhengData = {{ detail.institutional_excluding_dongzheng_series | map(attribute='net_position') | list | tojson }};
+    const retailData = {{ detail.retail_series | map(attribute='net_position') | list | tojson }};
+
+    var allLabels = rawLabels;
+
+    var chart = new Chart(document.getElementById('netChart'), {
+      type: 'line',
+      data: {
+        labels: allLabels,
+        datasets: [
+          {
+            label: '机构阵营净持仓',
+            data: institutionalData,
+            borderColor: '#d92d20',
+            backgroundColor: 'rgba(217, 45, 32, 0.12)',
+            tension: 0.25,
+            fill: false
+          },
+          {
+            label: '机构阵营净持仓（不含东证期货）',
+            data: institutionalExcludingDongzhengData,
+            borderColor: '#7f1d1d',
+            backgroundColor: 'rgba(127, 29, 29, 0.10)',
+            tension: 0.25,
+            fill: false
+          },
+          {
+            label: '散户阵营净持仓',
+            data: retailData,
+            borderColor: '#16a34a',
+            backgroundColor: 'rgba(22, 163, 74, 0.12)',
+            tension: 0.25,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            onClick: function(event, legendItem, legend) {
+              var index = legendItem.datasetIndex;
+              var chart = legend.chart;
+              chart.setDatasetVisibility(index, !chart.isDatasetVisible(index));
+              chart.update();
+            },
+            labels: {
+              usePointStyle: true,
+              boxWidth: 10
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: false,
+            grid: {
+              color: '#f1f5f9'
+            }
+          },
+          x: {
+            grid: {
+              display: false
+            }
+          }
+        }
+      }
+    });
+
+    (function initRangeSlider() {
+      var n = allLabels.length;
+      if (n === 0) return;
+
+      var startInput = document.getElementById('range-start');
+      var endInput = document.getElementById('range-end');
+      var startLabel = document.getElementById('range-label-start');
+      var endLabel = document.getElementById('range-label-end');
+      var resetBtn = document.getElementById('range-reset');
+
+      startInput.max = n - 1;
+      endInput.max = n - 1;
+      endInput.value = n - 1;
+      startLabel.textContent = allLabels[0];
+      endLabel.textContent = allLabels[n - 1];
+
+      var track = document.getElementById('range-track');
+      var fill = document.createElement('div');
+      fill.className = 'range-fill';
+      track.appendChild(fill);
+
+      function updateFill() {
+        var s = parseInt(startInput.value);
+        var e = parseInt(endInput.value);
+        var pct1 = s / (n - 1) * 100;
+        var pct2 = e / (n - 1) * 100;
+        fill.style.left = pct1 + '%';
+        fill.style.width = (pct2 - pct1) + '%';
+      }
+
+      function applyRange() {
+        var s = parseInt(startInput.value);
+        var e = parseInt(endInput.value);
+        if (s > e) { s = e; startInput.value = s; }
+        startLabel.textContent = allLabels[s];
+        endLabel.textContent = allLabels[e];
+        chart.data.labels = allLabels.slice(s, e + 1);
+        chart.data.datasets[0].data = institutionalData.slice(s, e + 1);
+        chart.data.datasets[1].data = institutionalExcludingDongzhengData.slice(s, e + 1);
+        chart.data.datasets[2].data = retailData.slice(s, e + 1);
+        chart.update('none');
+        updateFill();
+      }
+
+      startInput.addEventListener('input', applyRange);
+      endInput.addEventListener('input', applyRange);
+      resetBtn.addEventListener('click', function() {
+        startInput.value = 0;
+        endInput.value = n - 1;
+        applyRange();
+      });
+      updateFill();
+    })();
+  </script>
+</body>
+</html>
