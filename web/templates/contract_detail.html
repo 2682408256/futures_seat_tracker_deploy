@@ -164,6 +164,20 @@
       padding: 4px 8px;
       text-align: right;
     }
+    .capital-alerts {
+      padding: 14px 16px;
+    }
+    .capital-alerts h2 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+    .alert-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #374151;
+      font-size: 12px;
+      line-height: 1.7;
+    }
     .chart-card {
       background: linear-gradient(180deg, #ffffff 0%, #fff8f8 100%);
     }
@@ -309,6 +323,15 @@
           {% endfor %}
         </select>
       </form>
+    </section>
+
+    <section class="panel capital-alerts">
+      <h2>资金异动提示</h2>
+      <ul class="alert-list">
+        {% for alert in detail.capital_alerts %}
+        <li>{{ alert }}</li>
+        {% endfor %}
+      </ul>
     </section>
 
     <div class="grid">

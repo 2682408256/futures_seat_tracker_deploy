@@ -152,6 +152,39 @@
       font-size: 13px;
       color: var(--muted);
     }
+    .home-alert-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .home-alert-item {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 8px 10px;
+      border: 1px solid rgba(239, 68, 68, 0.12);
+      border-radius: 12px;
+      background: #fffafa;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .home-alert-level {
+      flex: 0 0 auto;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--red-soft);
+      color: var(--red);
+      font-weight: 800;
+    }
+    .home-alert-link {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .home-alert-link strong {
+      color: var(--red);
+    }
     .table-wrap {
       overflow-x: auto;
     }
@@ -283,6 +316,26 @@
           <div class="helper-text">郑商所无需手动上传，命令行轮询抓到数据后会自动解析并导入数据库。</div>
         </div>
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <h2>今日重大异动</h2>
+      </div>
+      {% if home_capital_alerts %}
+      <ul class="home-alert-list">
+        {% for alert in home_capital_alerts %}
+        <li>
+          <a class="home-alert-item home-alert-link" href="/contract/{{ alert.exchange }}/{{ alert.product_code }}?date={{ alert.trade_date }}">
+            <span class="home-alert-level">{{ alert.level }}</span>
+            <span><strong>{{ alert.product_name }}</strong> {{ alert.contract_code }}：{{ alert.message }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="helper-text">暂无明显重大异动。</div>
+      {% endif %}
     </section>
 
     <section class="panel">

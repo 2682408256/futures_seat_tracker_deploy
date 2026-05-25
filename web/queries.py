@@ -39,6 +39,7 @@ INSTITUTIONAL_MEMBERS = [
     "中信期货",
     "国泰君安",
     "瑞银期货",
+    "摩根大通",
 ]
 
 INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG = [
@@ -72,6 +73,18 @@ class ContractNavItem:
 
 
 @dataclass(frozen=True)
+class HomeCapitalAlert:
+    exchange: str
+    product_code: str
+    product_name: str
+    trade_date: str
+    contract_code: str
+    level: str
+    message: str
+    score: int
+
+
+@dataclass(frozen=True)
 class MemberNetRow:
     member_label: str
     matched_member_names: list[str]
@@ -98,6 +111,7 @@ class ContractDetailData:
     institutional_series: list[dict[str, object]]
     institutional_excluding_dongzheng_series: list[dict[str, object]]
     retail_series: list[dict[str, object]]
+    capital_alerts: list[str]
     switches: list[dict[str, object]]
     weighted_placeholder: str
 
@@ -200,6 +214,17 @@ class DashboardQueries:
             _, switch_events = get_dominant_switches(self.db_path, exchange, product_code)
             contract_code = dominant.contract_code
 
+        capital_alerts = self._build_capital_alerts(
+            exchange,
+            product_code,
+            trade_date,
+            contract_code,
+            institutional_rows,
+            retail_rows,
+            institutional_series,
+            retail_series,
+        )
+
         return ContractDetailData(
             exchange=exchange,
             product_code=product_code,
@@ -214,6 +239,7 @@ class DashboardQueries:
             institutional_series=institutional_series,
             institutional_excluding_dongzheng_series=institutional_excluding_dongzheng_series,
             retail_series=retail_series,
+            capital_alerts=capital_alerts,
             switches=[
                 {
                     "prev_trade_date": event.prev_trade_date,
@@ -237,6 +263,60 @@ class DashboardQueries:
             matches = sorted(name for name in all_names if label in name)
             results.append(NameCheckResult(label=label, matches=matches))
         return results
+
+    def get_home_capital_alerts(self, limit: int = 10) -> list[HomeCapitalAlert]:
+        items = self.list_dominant_contracts()
+        alerts: list[HomeCapitalAlert] = []
+        for item in items:
+            contract_code = "" if item.exchange == "czce" else item.contract_code
+            inst_rows = self._build_member_rows(item.exchange, item.trade_date, item.product_code, contract_code, INSTITUTIONAL_MEMBERS)
+            ret_rows = self._build_member_rows(item.exchange, item.trade_date, item.product_code, contract_code, RETAIL_MEMBERS)
+            inst_change = sum(row.net_change for row in inst_rows)
+            ret_change = sum(row.net_change for row in ret_rows)
+            active_inst = [row for row in inst_rows if row.net_change != 0]
+            pos = sum(1 for row in active_inst if row.net_change > 0)
+            neg = sum(1 for row in active_inst if row.net_change < 0)
+            total = len(active_inst)
+            score = abs(inst_change)
+            level = "异动"
+            parts: list[str] = []
+            if inst_change:
+                direction = "增加" if inst_change > 0 else "减少"
+                parts.append(f"机构净持仓{direction} {abs(inst_change):,} 手")
+            if inst_change * ret_change < 0:
+                inst_dir = "增多" if inst_change > 0 else "减多"
+                ret_dir = "增多" if ret_change > 0 else "减多"
+                level = "分歧"
+                score += abs(ret_change)
+                parts.append(f"机构{inst_dir}、散户{ret_dir}")
+            if total >= 3:
+                if max(pos, neg) / total >= 0.7:
+                    direction = "增多" if pos > neg else "减多"
+                    level = "主力统一" if level == "异动" else level
+                    score += 20000
+                    parts.append(f"{max(pos, neg)}/{total} 个机构席位同步{direction}")
+                elif pos >= 2 and neg >= 2:
+                    level = "主力分歧" if level == "异动" else level
+                    score += 20000
+                    parts.append(f"{pos} 个席位增多、{neg} 个席位减多")
+            if abs(inst_change) >= 10000:
+                level = "强异动" if level == "异动" else level
+                score += 30000
+            if parts and score >= 5000:
+                alerts.append(
+                    HomeCapitalAlert(
+                        exchange=item.exchange,
+                        product_code=item.product_code,
+                        product_name=item.product_name,
+                        trade_date=item.trade_date,
+                        contract_code=item.contract_code,
+                        level=level,
+                        message="；".join(parts),
+                        score=score,
+                    )
+                )
+        alerts.sort(key=lambda a: (-a.score, a.product_name))
+        return alerts[:limit]
 
     def _get_available_dates(self, exchange: str, product_code: str) -> list[str]:
         query_field = "product_name" if exchange == "dce" else "product_code"
@@ -306,6 +386,106 @@ class DashboardQueries:
                 }
             )
         return series
+
+    def _build_capital_alerts(
+        self,
+        exchange: str,
+        product_code: str,
+        trade_date: str,
+        contract_code: str,
+        institutional_rows: list[MemberNetRow],
+        retail_rows: list[MemberNetRow],
+        institutional_series: list[dict[str, object]],
+        retail_series: list[dict[str, object]],
+    ) -> list[str]:
+        alerts: list[str] = []
+        inst_current, inst_previous, inst_avg = self._series_change_stats(institutional_series, trade_date)
+        retail_current, retail_previous, retail_avg = self._series_change_stats(retail_series, trade_date)
+        if inst_current is not None and inst_previous is not None:
+            inst_change = inst_current - inst_previous
+            if inst_avg > 0 and abs(inst_change) >= inst_avg * 2:
+                direction = "增加" if inst_change > 0 else "减少"
+                alerts.append(
+                    f"机构阵营净持仓较上一交易日{direction} {abs(inst_change):,} 手，约为近20日平均变化的 {abs(inst_change) / inst_avg:.1f} 倍。"
+                )
+            elif inst_previous and abs(inst_change / inst_previous) >= 0.2:
+                direction = "增加" if inst_change > 0 else "减少"
+                alerts.append(f"机构阵营净持仓较上一交易日{direction} {abs(inst_change):,} 手，变化幅度超过 20%。")
+        if inst_current is not None and inst_previous is not None and retail_current is not None and retail_previous is not None:
+            inst_change = inst_current - inst_previous
+            retail_change = retail_current - retail_previous
+            if inst_change * retail_change < 0:
+                inst_direction = "增多" if inst_change > 0 else "减多"
+                retail_direction = "增多" if retail_change > 0 else "减多"
+                alerts.append(f"机构阵营{inst_direction}、散户阵营{retail_direction}，阵营方向出现背离。")
+        member_alert = self._build_member_change_alert(exchange, product_code, trade_date, contract_code, institutional_rows)
+        if member_alert:
+            alerts.append(member_alert)
+        consensus_alert = self._build_consensus_alert(institutional_rows)
+        if consensus_alert:
+            alerts.append(consensus_alert)
+        if not alerts:
+            alerts.append("暂无明显资金异动，机构席位变化整体处于正常范围。")
+        return alerts
+
+    def _series_change_stats(self, series: list[dict[str, object]], trade_date: str) -> tuple[int | None, int | None, float]:
+        index = next((i for i, item in enumerate(series) if item["trade_date"] == trade_date), -1)
+        if index <= 0:
+            return None, None, 0.0
+        current = int(series[index]["net_position"])
+        previous = int(series[index - 1]["net_position"])
+        changes = [
+            abs(int(series[i]["net_position"]) - int(series[i - 1]["net_position"]))
+            for i in range(max(1, index - 19), index + 1)
+        ]
+        average = sum(changes) / len(changes) if changes else 0.0
+        return current, previous, average
+
+    def _build_member_change_alert(
+        self,
+        exchange: str,
+        product_code: str,
+        trade_date: str,
+        contract_code: str,
+        institutional_rows: list[MemberNetRow],
+    ) -> str:
+        available_dates = list(reversed(self._get_available_dates(exchange, product_code)))
+        current_index = available_dates.index(trade_date) if trade_date in available_dates else -1
+        if current_index <= 0:
+            return ""
+        strongest_row = max(institutional_rows, key=lambda row: abs(row.net_change), default=None)
+        if strongest_row is None or strongest_row.net_change == 0:
+            return ""
+        history: list[int] = []
+        for date in available_dates[max(0, current_index - 20):current_index]:
+            current_contract_code = contract_code
+            if exchange != "czce":
+                dominant = get_dominant_contract(self.db_path, exchange, date, product_code)
+                if dominant is None:
+                    continue
+                current_contract_code = dominant.contract_code
+            rows = self._build_member_rows(exchange, date, product_code, current_contract_code if exchange != "czce" else "", [strongest_row.member_label])
+            if rows:
+                history.append(abs(rows[0].net_change))
+        average = sum(history) / len(history) if history else 0.0
+        if average > 0 and abs(strongest_row.net_change) >= average * 2:
+            direction = "增加" if strongest_row.net_change > 0 else "减少"
+            return f"{strongest_row.member_label} 净持仓{direction} {abs(strongest_row.net_change):,} 手，约为近20日平均变化的 {abs(strongest_row.net_change) / average:.1f} 倍。"
+        return ""
+
+    def _build_consensus_alert(self, institutional_rows: list[MemberNetRow]) -> str:
+        active_rows = [row for row in institutional_rows if row.net_change != 0]
+        if len(active_rows) < 3:
+            return ""
+        positive_count = sum(1 for row in active_rows if row.net_change > 0)
+        negative_count = sum(1 for row in active_rows if row.net_change < 0)
+        total = len(active_rows)
+        if max(positive_count, negative_count) / total >= 0.7:
+            direction = "增多" if positive_count > negative_count else "减多"
+            return f"主力意见较统一：{max(positive_count, negative_count)}/{total} 个机构席位同步{direction}。"
+        if positive_count >= 2 and negative_count >= 2:
+            return f"主力产生分歧：{positive_count} 个机构席位增多，{negative_count} 个机构席位减多。"
+        return ""
 
     def _build_member_rows(
         self,

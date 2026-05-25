@@ -46,9 +46,11 @@ def create_app(db_path: Path | None = None, start_polling: bool = True) -> Flask
     def index() -> str:
         search = request.args.get("q", "")
         items = queries.list_dominant_contracts(search=search)
+        home_capital_alerts = queries.get_home_capital_alerts()
         return render_template(
             "index.html",
             items=items,
+            home_capital_alerts=home_capital_alerts,
             search=search,
             item_count=len(items),
             message=request.args.get("message", ""),
