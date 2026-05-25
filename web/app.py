@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -113,6 +113,48 @@ def create_app(db_path: Path | None = None, start_polling: bool = True) -> Flask
         if errors:
             messages.extend(errors)
         return _redirect_with_message("，".join(messages), "success" if not errors else "warning")
+
+    @app.post("/collect/czce")
+    def collect_czce():
+        start_date = request.form.get("start_date", "").strip()
+        end_date = request.form.get("end_date", "").strip() or start_date
+        if not start_date:
+            return _redirect_with_message("请选择郑商所采集日期。", "error")
+        try:
+            dates = _build_trade_date_range(start_date, end_date)
+        except ValueError as exc:
+            return _redirect_with_message(str(exc), "error")
+
+        successes: list[str] = []
+        misses: list[str] = []
+        errors: list[str] = []
+        for trade_date in dates:
+            try:
+                holding_found = process_trade_date("czce", trade_date, db_file=str(database_path))
+                daily_found = process_czce_daily(trade_date, db_file=str(database_path))
+                if holding_found or daily_found:
+                    parts = []
+                    if holding_found:
+                        parts.append("持仓")
+                    if daily_found:
+                        parts.append("日行情")
+                    successes.append(f"{trade_date}({'/'.join(parts)})")
+                else:
+                    misses.append(trade_date)
+            except Exception as exc:
+                errors.append(f"{trade_date}：{exc}")
+
+        messages = []
+        if successes:
+            messages.append(f"已采集 {len(successes)} 天：{'，'.join(successes)}")
+        if misses:
+            messages.append(f"无数据 {len(misses)} 天：{'，'.join(misses)}")
+        if errors:
+            messages.append(f"失败 {len(errors)} 天：{'；'.join(errors)}")
+        if not messages:
+            messages.append("没有可采集的交易日。")
+        level = "success" if successes and not errors else "warning" if successes else "error"
+        return _redirect_with_message("；".join(messages), level)
 
     @app.post("/upload-daily/<exchange>")
     def upload_daily_file(exchange: str):
@@ -271,6 +313,32 @@ def _run_czce_polling_loop(db_path: Path) -> None:
 
 def _build_czce_polling_summary() -> str:
     return f"郑商所每日 {POLL_START_HOUR}:00 后每 {POLL_INTERVAL_MINUTES} 分钟自动查询，抓到持仓排名和日行情后自动解析入库。"
+
+
+def _build_trade_date_range(start_date: str, end_date: str) -> list[str]:
+    start = _parse_form_date(start_date)
+    end = _parse_form_date(end_date)
+    if start > end:
+        raise ValueError("开始日期不能晚于结束日期。")
+    dates: list[str] = []
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            dates.append(current.strftime("%Y%m%d"))
+        current += timedelta(days=1)
+    if not dates:
+        raise ValueError("选择范围内没有工作日。")
+    return dates
+
+
+def _parse_form_date(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        try:
+            return datetime.strptime(value, "%Y%m%d")
+        except ValueError as exc:
+            raise ValueError("日期格式不正确。") from exc
 
 
 def _redirect_with_message(message: str, level: str):

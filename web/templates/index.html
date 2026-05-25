@@ -332,9 +332,14 @@
           </form>
         </div>
         <div class="upload-card">
-          <h3>郑商所自动采集</h3>
+          <h3>郑商所采集</h3>
           <p>{{ czce_polling_summary }}</p>
-          <div class="helper-text">郑商所无需手动上传，命令行轮询抓到数据后会自动解析并导入数据库。</div>
+          <form class="upload-form" method="post" action="/collect/czce">
+            <input type="date" name="start_date" required>
+            <input type="date" name="end_date">
+            <button type="submit">手动采集</button>
+            <div class="helper-text">结束日期可不填；不填时只采集开始日期。日期范围会跳过周末，并同时尝试持仓排名和日行情。</div>
+          </form>
         </div>
         <div class="upload-card">
           <h3>大商所日行情上传</h3>
