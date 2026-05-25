@@ -22,33 +22,43 @@ def get_dominant_contract_candidates(
     trade_date: str,
     product_code: str,
 ) -> list[DominantContractCandidate]:
-    if exchange == "czce":
-        raise ValueError("CZCE 当前是品种层数据，暂不支持合约主力识别")
-
     normalized_date = _normalize_trade_date(trade_date)
     normalized_product_code = product_code.upper()
     query_field = "product_name" if exchange == "dce" else "product_code"
     database = Database(db_path)
     with database.connect() as connection:
         rows = connection.execute(
-            f"""
-            SELECT
-                contract_code,
-                MAX(CASE WHEN ranking_type = 'volume' THEN total_value END) AS volume_total,
-                MAX(CASE WHEN ranking_type = 'long_open_interest' THEN total_value END) AS long_open_interest_total,
-                MAX(CASE WHEN ranking_type = 'short_open_interest' THEN total_value END) AS short_open_interest_total
-            FROM totals
+            """
+            SELECT contract_code, volume, open_interest, 0
+            FROM daily_markets
             WHERE trade_date = ?
               AND exchange = ?
-              AND {query_field} = ?
+              AND (product_code = ? OR product_name = ?)
               AND contract_code != ''
-            GROUP BY contract_code
-            ORDER BY volume_total DESC,
-                     (COALESCE(long_open_interest_total, 0) + COALESCE(short_open_interest_total, 0)) DESC,
-                     contract_code ASC
+            ORDER BY volume DESC, open_interest DESC, contract_code ASC
             """,
-            (normalized_date, exchange, normalized_product_code),
+            (normalized_date, exchange, normalized_product_code, product_code),
         ).fetchall()
+        if not rows:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    contract_code,
+                    MAX(CASE WHEN ranking_type = 'volume' THEN total_value END) AS volume_total,
+                    MAX(CASE WHEN ranking_type = 'long_open_interest' THEN total_value END) AS long_open_interest_total,
+                    MAX(CASE WHEN ranking_type = 'short_open_interest' THEN total_value END) AS short_open_interest_total
+                FROM totals
+                WHERE trade_date = ?
+                  AND exchange = ?
+                  AND {query_field} = ?
+                  AND contract_code != ''
+                GROUP BY contract_code
+                ORDER BY volume_total DESC,
+                         (COALESCE(long_open_interest_total, 0) + COALESCE(short_open_interest_total, 0)) DESC,
+                         contract_code ASC
+                """,
+                (normalized_date, exchange, normalized_product_code),
+            ).fetchall()
 
     candidates: list[DominantContractCandidate] = []
     for index, row in enumerate(rows, start=1):

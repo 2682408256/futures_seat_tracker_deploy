@@ -10,8 +10,10 @@ from flask import Flask, abort, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
 from futures_seat_tracker.config import DEFAULT_DB_PATH, POLL_INTERVAL_MINUTES, POLL_START_HOUR, RAW_DIR
-from futures_seat_tracker.main import process_trade_date
+from futures_seat_tracker.main import process_czce_daily, process_trade_date
 from futures_seat_tracker.parsers.dce import parse_dce_zip
+from futures_seat_tracker.parsers.dce_daily import parse_dce_daily_file
+from futures_seat_tracker.parsers.shfe_daily import parse_shfe_daily_file
 from futures_seat_tracker.parsers.shfe import parse_shfe_file
 from futures_seat_tracker.storage.csv_writer import CsvWriter
 from futures_seat_tracker.storage.db import Database
@@ -108,6 +110,48 @@ def create_app(db_path: Path | None = None, start_polling: bool = True) -> Flask
             messages.extend(errors)
         return _redirect_with_message("，".join(messages), "success" if not errors else "warning")
 
+    @app.post("/upload-daily/<exchange>")
+    def upload_daily_file(exchange: str):
+        if exchange not in ("dce", "shfe"):
+            abort(404)
+        uploaded_files = request.files.getlist("files")
+        if not uploaded_files or all(not f.filename for f in uploaded_files):
+            return _redirect_with_message("请选择要上传的日行情文件。", "error")
+
+        results: list[tuple[str, str, int]] = []
+        errors: list[str] = []
+        for uploaded_file in uploaded_files:
+            if not uploaded_file.filename:
+                continue
+            original_name = Path(uploaded_file.filename).name
+            if Path(original_name).suffix.lower() != ".txt":
+                errors.append(f"{original_name}：仅支持 .txt 文件，已跳过。")
+                continue
+            timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d%H%M%S")
+            safe_name = secure_filename(original_name) or f"{exchange}_daily.txt"
+            target_dir = RAW_DIR / exchange / "daily_uploads"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            file_path = target_dir / f"{timestamp}_{safe_name}"
+            uploaded_file.save(file_path)
+            try:
+                trade_date, count = _import_daily_uploaded_file(exchange, file_path, database_path)
+                results.append((original_name, trade_date, count))
+            except ValueError as exc:
+                errors.append(f"{original_name}：{exc}")
+                if file_path.exists():
+                    file_path.unlink()
+            except Exception:
+                errors.append(f"{original_name}：处理失败，已跳过。")
+                if file_path.exists():
+                    file_path.unlink()
+
+        if not results and errors:
+            return _redirect_with_message("；".join(errors), "error")
+        messages = [f"{name} → {date}，{count} 条" for name, date, count in results]
+        if errors:
+            messages.extend(errors)
+        return _redirect_with_message("，".join(messages), "success" if not errors else "warning")
+
     @app.route("/contract/<exchange>/<product_code>")
     def contract_detail(exchange: str, product_code: str) -> str:
         trade_date = request.args.get("date")
@@ -122,6 +166,25 @@ def create_app(db_path: Path | None = None, start_polling: bool = True) -> Flask
         return render_template("contract_detail.html", detail=detail)
 
     return app
+
+
+def _import_daily_uploaded_file(exchange: str, file_path: Path, db_path: Path) -> tuple[str, int]:
+    if exchange == "dce":
+        records = parse_dce_daily_file(file_path, exchange=exchange)
+    elif exchange == "shfe":
+        records = parse_shfe_daily_file(file_path, exchange=exchange)
+    else:
+        raise ValueError(f"Unsupported daily exchange: {exchange}")
+    target_trade_date = records[0].trade_date if records else ""
+    if not target_trade_date:
+        raise ValueError("文件解析失败，未识别到交易日。")
+    writer = CsvWriter()
+    writer.write_daily_markets(exchange, target_trade_date, records)
+    database = Database(db_path)
+    database.initialize()
+    importer = CsvImporter(database)
+    count = importer.import_daily_markets(exchange, target_trade_date)
+    return target_trade_date, count
 
 
 def _import_uploaded_file(exchange: str, file_path: Path, trade_date: str | None, db_path: Path) -> str:
@@ -192,6 +255,10 @@ def _run_czce_polling_loop(db_path: Path) -> None:
 
         if process_trade_date("czce", trade_date, db_file=str(db_path)):
             last_completed_trade_date = trade_date
+            try:
+                process_czce_daily(trade_date, db_file=str(db_path))
+            except Exception as exc:
+                print(f"CZCE daily market import failed for {trade_date}: {exc}")
             time.sleep(600)
             continue
 
@@ -199,7 +266,7 @@ def _run_czce_polling_loop(db_path: Path) -> None:
 
 
 def _build_czce_polling_summary() -> str:
-    return f"郑商所每日 {POLL_START_HOUR}:00 后每 {POLL_INTERVAL_MINUTES} 分钟自动查询，抓到数据后自动解析入库。"
+    return f"郑商所每日 {POLL_START_HOUR}:00 后每 {POLL_INTERVAL_MINUTES} 分钟自动查询，抓到持仓排名和日行情后自动解析入库。"
 
 
 def _redirect_with_message(message: str, level: str):

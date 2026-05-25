@@ -315,6 +315,26 @@
           <p>{{ czce_polling_summary }}</p>
           <div class="helper-text">郑商所无需手动上传，命令行轮询抓到数据后会自动解析并导入数据库。</div>
         </div>
+        <div class="upload-card">
+          <h3>大商所日行情上传</h3>
+          <p>上传交易所原始日行情 txt 文件，系统自动解析日期并入库，支持批量上传。</p>
+          <form class="upload-form" method="post" action="/upload-daily/dce" enctype="multipart/form-data" id="dce-daily-upload-form">
+            <input type="file" name="files" multiple accept=".txt" required id="dce-daily-files">
+            <div class="helper-text" id="dce-daily-file-list"></div>
+            <button type="submit">上传并导入</button>
+            <div class="helper-text">支持 .txt，可一次选择多个文件；日期自动从文件内容识别，无需填写。</div>
+          </form>
+        </div>
+        <div class="upload-card">
+          <h3>上期所日行情上传</h3>
+          <p>上传上期所日交易快讯 txt 文件，系统自动解析交易日期和行情字段并入库。</p>
+          <form class="upload-form" method="post" action="/upload-daily/shfe" enctype="multipart/form-data" id="shfe-daily-upload-form">
+            <input type="file" name="files" multiple accept=".txt" required id="shfe-daily-files">
+            <div class="helper-text" id="shfe-daily-file-list"></div>
+            <button type="submit">上传并导入</button>
+            <div class="helper-text">支持 .txt，可一次选择多个文件；日期会从“上海期货交易所期货价格指数”表头识别。</div>
+          </form>
+        </div>
       </div>
     </section>
 
@@ -391,5 +411,7 @@
   }
   bindFileList('dce-files', 'dce-file-list');
   bindFileList('shfe-files', 'shfe-file-list');
+  bindFileList('dce-daily-files', 'dce-daily-file-list');
+  bindFileList('shfe-daily-files', 'shfe-daily-file-list');
 </script>
 </html>

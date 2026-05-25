@@ -19,4 +19,4 @@ export FST_WEB_HOST="$WEB_HOST"
 export FST_WEB_PORT="$WEB_PORT"
 
 python -m pip install -r requirements.txt
-exec python futures_seat_tracker/main.py serve
+exec python main.py serve

@@ -52,10 +52,39 @@ SCHEMA_STATEMENTS = [
         UNIQUE(trade_date, exchange, product_code, contract_code, ranking_type)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS daily_markets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_date TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        product_code TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        contract_code TEXT NOT NULL,
+        open_price REAL NOT NULL DEFAULT 0,
+        high_price REAL NOT NULL DEFAULT 0,
+        low_price REAL NOT NULL DEFAULT 0,
+        close_price REAL NOT NULL DEFAULT 0,
+        settlement_price REAL NOT NULL DEFAULT 0,
+        previous_settlement_price REAL NOT NULL DEFAULT 0,
+        change_value REAL NOT NULL DEFAULT 0,
+        close_change REAL NOT NULL DEFAULT 0,
+        settlement_change REAL NOT NULL DEFAULT 0,
+        change_pct REAL NOT NULL DEFAULT 0,
+        volume INTEGER NOT NULL DEFAULT 0,
+        open_interest INTEGER NOT NULL DEFAULT 0,
+        open_interest_change INTEGER NOT NULL DEFAULT 0,
+        turnover REAL NOT NULL DEFAULT 0,
+        source_file TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(trade_date, exchange, product_code, contract_code)
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_instruments_trade_exchange_product ON instruments(trade_date, exchange, product_code)",
     "CREATE INDEX IF NOT EXISTS idx_rankings_trade_exchange_product_contract_type ON rankings(trade_date, exchange, product_code, contract_code, ranking_type)",
     "CREATE INDEX IF NOT EXISTS idx_rankings_member_trade ON rankings(member_name, trade_date)",
     "CREATE INDEX IF NOT EXISTS idx_totals_trade_exchange_product_contract_type ON totals(trade_date, exchange, product_code, contract_code, ranking_type)",
+    "CREATE INDEX IF NOT EXISTS idx_daily_markets_trade_exchange ON daily_markets(trade_date, exchange)",
+    "CREATE INDEX IF NOT EXISTS idx_daily_markets_exchange_product_contract ON daily_markets(exchange, product_code, contract_code)",
 ]
 
 
@@ -73,4 +102,17 @@ class Database:
         with self.connect() as connection:
             for statement in SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            self._ensure_daily_market_columns(connection)
             connection.commit()
+
+    def _ensure_daily_market_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(daily_markets)")}
+        migrations = {
+            "open_interest_change": "ALTER TABLE daily_markets ADD COLUMN open_interest_change INTEGER NOT NULL DEFAULT 0",
+            "turnover": "ALTER TABLE daily_markets ADD COLUMN turnover REAL NOT NULL DEFAULT 0",
+            "close_change": "ALTER TABLE daily_markets ADD COLUMN close_change REAL NOT NULL DEFAULT 0",
+            "settlement_change": "ALTER TABLE daily_markets ADD COLUMN settlement_change REAL NOT NULL DEFAULT 0",
+        }
+        for column, statement in migrations.items():
+            if column not in columns:
+                connection.execute(statement)

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from futures_seat_tracker.config import PARSED_DIR
-from futures_seat_tracker.models import InstrumentRecord, RankingRecord, TotalRecord
+from futures_seat_tracker.models import DailyMarketRecord, InstrumentRecord, RankingRecord, TotalRecord
 
 
 class CsvWriter:
@@ -38,6 +38,18 @@ class CsvWriter:
             "rankings": ranking_path,
             "totals": total_path,
         }
+
+    def write_daily_markets(
+        self,
+        exchange: str,
+        trade_date: str,
+        records: Iterable[DailyMarketRecord],
+    ) -> Path:
+        output_dir = self.build_output_dir(exchange, trade_date)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / "daily_markets.csv"
+        self.write_csv(file_path, records)
+        return file_path
 
     def write_csv(self, file_path: Path, rows: Iterable[object]) -> None:
         rows = list(rows)

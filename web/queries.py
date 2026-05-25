@@ -154,13 +154,13 @@ class DashboardQueries:
                 """
             ).fetchall()
         for exchange, trade_date, lookup_code in rows:
-            if exchange == "czce":
-                contract_code = "品种汇总"
+            dominant = get_dominant_contract(self.db_path, exchange, trade_date, lookup_code)
+            if dominant is None:
+                contract_code = "品种汇总" if exchange == "czce" else ""
             else:
-                dominant = get_dominant_contract(self.db_path, exchange, trade_date, lookup_code)
-                if dominant is None:
-                    continue
                 contract_code = dominant.contract_code
+            if not contract_code:
+                continue
             items.append(
                 ContractIndexItem(
                     exchange=exchange,
@@ -182,7 +182,7 @@ class DashboardQueries:
         ]
 
     def get_contract_detail(self, exchange: str, product_code: str, trade_date: str) -> ContractDetailData | None:
-        dominant = None if exchange == "czce" else get_dominant_contract(self.db_path, exchange, trade_date, product_code)
+        dominant = get_dominant_contract(self.db_path, exchange, trade_date, product_code)
 
         available_dates = self._get_available_dates(exchange, product_code)
         previous_item, next_item = self._get_adjacent_items(exchange, product_code, trade_date)
@@ -198,7 +198,7 @@ class DashboardQueries:
             )
             retail_series = self._build_group_series(exchange, product_code, RETAIL_MEMBERS, contract_code="")
             switch_events: list = []
-            contract_code = "品种汇总"
+            contract_code = dominant.contract_code if dominant is not None else "品种汇总"
         else:
             if dominant is None:
                 return None

@@ -16,6 +16,14 @@ class CsvImporter:
         input_dir = PARSED_DIR / exchange / trade_date[:4] / trade_date
         return self.import_from_dir(input_dir)
 
+    def import_daily_markets(self, exchange: str, trade_date: str) -> int:
+        input_dir = PARSED_DIR / exchange / trade_date[:4] / trade_date
+        file_path = input_dir / "daily_markets.csv"
+        with self.database.connect() as connection:
+            count = self._import_file(connection, "daily_markets", file_path)
+            connection.commit()
+        return count
+
     def import_from_dir(self, input_dir: Path) -> dict[str, int]:
         file_map = {
             "instruments": input_dir / "instruments.csv",
@@ -70,10 +78,22 @@ class CsvImporter:
         integer_fields = {
             "rankings": ["rank", "value", "change_value"],
             "totals": ["total_value", "total_change_value"],
+            "daily_markets": ["volume", "open_interest", "open_interest_change"],
+        }.get(table_name, [])
+
+        float_fields = {
+            "daily_markets": [
+                "open_price", "high_price", "low_price", "close_price",
+                "settlement_price", "previous_settlement_price",
+                "change_value", "close_change", "settlement_change", "change_pct", "turnover",
+            ],
         }.get(table_name, [])
 
         for field in integer_fields:
             normalized[field] = int(normalized[field])
+
+        for field in float_fields:
+            normalized[field] = float(normalized[field])
 
         return normalized
 
@@ -89,4 +109,6 @@ class CsvImporter:
             return ["trade_date", "exchange", "product_code", "contract_code", "ranking_type", "rank", "member_name"]
         if table_name == "totals":
             return ["trade_date", "exchange", "product_code", "contract_code", "ranking_type"]
+        if table_name == "daily_markets":
+            return ["trade_date", "exchange", "product_code", "contract_code"]
         raise ValueError(f"Unsupported table: {table_name}")

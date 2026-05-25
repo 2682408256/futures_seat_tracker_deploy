@@ -48,3 +48,27 @@ class TotalRecord:
     total_change_value: int
     contract_code: str = ""
     source_file: str = ""
+
+
+@dataclass(frozen=True)
+class DailyMarketRecord:
+    trade_date: str
+    exchange: str
+    product_code: str
+    product_name: str
+    contract_code: str
+    open_price: float
+    high_price: float
+    low_price: float
+    close_price: float
+    settlement_price: float
+    previous_settlement_price: float
+    change_value: float
+    close_change: float
+    settlement_change: float
+    change_pct: float
+    volume: int
+    open_interest: int
+    open_interest_change: int = 0
+    turnover: float = 0.0
+    source_file: str = ""

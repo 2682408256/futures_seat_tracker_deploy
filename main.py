@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import types
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,12 +12,18 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if "futures_seat_tracker" not in sys.modules:
+    package = types.ModuleType("futures_seat_tracker")
+    package.__path__ = [str(PACKAGE_ROOT)]
+    package.__file__ = str(PACKAGE_ROOT / "__init__.py")
+    sys.modules["futures_seat_tracker"] = package
 
 from futures_seat_tracker.analysis.dominant_contracts import get_dominant_contract, get_dominant_contract_candidates
 from futures_seat_tracker.analysis.rollover import get_dominant_switches
 from futures_seat_tracker.collectors.czce import CzceCollector
 from futures_seat_tracker.config import DEFAULT_DB_PATH, POLL_END_HOUR, POLL_INTERVAL_MINUTES, POLL_START_HOUR, WEB_HOST, WEB_PORT
 from futures_seat_tracker.parsers.czce import parse_czce_file
+from futures_seat_tracker.parsers.czce_daily import parse_czce_daily_file
 from futures_seat_tracker.parsers.dce import parse_dce_zip
 from futures_seat_tracker.parsers.shfe import parse_shfe_file
 from futures_seat_tracker.storage.csv_writer import CsvWriter
@@ -61,6 +68,9 @@ def parse_args() -> argparse.Namespace:
     backfill_range_cmd.add_argument("--start-date", required=True)
     backfill_range_cmd.add_argument("--end-date", required=True)
 
+    czce_daily_cmd = subparsers.add_parser("czce-daily", parents=[db_parser])
+    czce_daily_cmd.add_argument("--date", required=True)
+
     subparsers.add_parser("init-db", parents=[db_parser])
 
     import_csv_cmd = subparsers.add_parser("import-csv", parents=[common_parser, db_parser])
@@ -99,6 +109,26 @@ def process_trade_date(exchange: str, trade_date: str, db_file: str | None = Non
         print(f"Wrote {name}: {path}")
     for table_name, count in counts.items():
         print(f"Imported {table_name}: {count}")
+    return True
+
+
+def process_czce_daily(trade_date: str, db_file: str | None = None) -> bool:
+    collector = CzceCollector()
+    result = collector.download_daily(trade_date)
+    if not result.found:
+        print(f"No daily market data for {trade_date}: {result.source_url}")
+        return False
+
+    records = parse_czce_daily_file(result.file_path, trade_date, exchange=result.exchange)
+    writer = CsvWriter()
+    output_path = writer.write_daily_markets(result.exchange, trade_date, records)
+    database = Database(Path(db_file) if db_file else DEFAULT_DB_PATH)
+    database.initialize()
+    importer = CsvImporter(database)
+    count = importer.import_daily_markets(result.exchange, trade_date)
+    print(f"Downloaded daily market data: {result.file_path}")
+    print(f"Wrote daily_markets: {output_path}")
+    print(f"Imported daily_markets: {count}")
     return True
 
 
@@ -287,6 +317,9 @@ def main() -> int:
             args.end_date,
             db_file=getattr(args, "db_file", None),
         )
+
+    if args.command == "czce-daily":
+        return 0 if process_czce_daily(trade_date, db_file=getattr(args, "db_file", None)) else 1
 
     if args.command == "init-db":
         return init_database(getattr(args, "db_file", None))
