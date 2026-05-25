@@ -61,6 +61,12 @@ class ContractIndexItem:
     product_name: str
     trade_date: str
     contract_code: str
+    close_price: float | None
+    settlement_price: float | None
+    close_change: float | None
+    settlement_change: float | None
+    volume: int | None
+    open_interest: int | None
 
 
 @dataclass(frozen=True)
@@ -127,32 +133,48 @@ class DashboardQueries:
         self.db_path = db_path
         self.database = Database(db_path)
 
-    def list_dominant_contracts(self, search: str = "") -> list[ContractIndexItem]:
+    def list_dominant_contracts(self, search: str = "", trade_date: str = "") -> list[ContractIndexItem]:
         items: list[ContractIndexItem] = []
+        normalized_trade_date = self._normalize_trade_date(trade_date)
         with self.database.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT
-                    exchange,
-                    trade_date,
-                    lookup_code
-                FROM (
+            if normalized_trade_date:
+                rows = connection.execute(
+                    """
                     SELECT DISTINCT
                         exchange,
                         trade_date,
-                        CASE WHEN exchange = 'dce' THEN product_name ELSE product_code END AS lookup_code,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY exchange,
-                                CASE WHEN exchange = 'dce' THEN product_name ELSE product_code END
-                            ORDER BY trade_date DESC
-                        ) AS rn
+                        CASE WHEN exchange = 'dce' THEN product_name ELSE product_code END AS lookup_code
                     FROM totals
                     WHERE exchange IN ('czce', 'shfe', 'dce')
-                )
-                WHERE rn = 1
-                ORDER BY trade_date DESC, exchange, lookup_code
-                """
-            ).fetchall()
+                      AND trade_date = ?
+                    ORDER BY exchange, lookup_code
+                    """,
+                    (normalized_trade_date,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        exchange,
+                        trade_date,
+                        lookup_code
+                    FROM (
+                        SELECT DISTINCT
+                            exchange,
+                            trade_date,
+                            CASE WHEN exchange = 'dce' THEN product_name ELSE product_code END AS lookup_code,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY exchange,
+                                    CASE WHEN exchange = 'dce' THEN product_name ELSE product_code END
+                                ORDER BY trade_date DESC
+                            ) AS rn
+                        FROM totals
+                        WHERE exchange IN ('czce', 'shfe', 'dce')
+                    )
+                    WHERE rn = 1
+                    ORDER BY trade_date DESC, exchange, lookup_code
+                    """
+                ).fetchall()
         for exchange, trade_date, lookup_code in rows:
             dominant = get_dominant_contract(self.db_path, exchange, trade_date, lookup_code)
             if dominant is None:
@@ -161,6 +183,7 @@ class DashboardQueries:
                 contract_code = dominant.contract_code
             if not contract_code:
                 continue
+            daily_market = self._get_daily_market_summary(exchange, trade_date, contract_code)
             items.append(
                 ContractIndexItem(
                     exchange=exchange,
@@ -168,6 +191,12 @@ class DashboardQueries:
                     product_name=self._resolve_product_name(exchange, lookup_code),
                     trade_date=trade_date,
                     contract_code=contract_code,
+                    close_price=daily_market[0],
+                    settlement_price=daily_market[1],
+                    close_change=daily_market[2],
+                    settlement_change=daily_market[3],
+                    volume=daily_market[4],
+                    open_interest=daily_market[5],
                 )
             )
         if not search:
@@ -252,6 +281,18 @@ class DashboardQueries:
             weighted_placeholder="加权合约预留，暂未启用",
         )
 
+    def list_trade_dates(self) -> list[str]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT trade_date
+                FROM totals
+                WHERE exchange IN ('czce', 'shfe', 'dce')
+                ORDER BY trade_date DESC
+                """
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
     def check_member_name_coverage(self) -> list[NameCheckResult]:
         labels = INSTITUTIONAL_MEMBERS + RETAIL_MEMBERS
         with self.database.connect() as connection:
@@ -318,6 +359,12 @@ class DashboardQueries:
         alerts.sort(key=lambda a: (-a.score, a.product_name))
         return alerts[:limit]
 
+    def _normalize_trade_date(self, value: str) -> str:
+        value = value.strip()
+        if len(value) == 8 and value.isdigit():
+            return f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+        return value
+
     def _get_available_dates(self, exchange: str, product_code: str) -> list[str]:
         query_field = "product_name" if exchange == "dce" else "product_code"
         with self.database.connect() as connection:
@@ -336,6 +383,22 @@ class DashboardQueries:
                 (exchange, product_code),
             ).fetchone()
         return str(row[0]) if row else product_code
+
+    def _get_daily_market_summary(
+        self, exchange: str, trade_date: str, contract_code: str
+    ) -> tuple[float | None, float | None, float | None, float | None, int | None, int | None]:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT close_price, settlement_price, close_change, settlement_change, volume, open_interest
+                FROM daily_markets
+                WHERE trade_date = ? AND exchange = ? AND contract_code = ?
+                """,
+                (trade_date, exchange, contract_code),
+            ).fetchone()
+        if not row:
+            return None, None, None, None, None, None
+        return row[0], row[1], row[2], row[3], row[4], row[5]
 
     def _get_adjacent_items(
         self,

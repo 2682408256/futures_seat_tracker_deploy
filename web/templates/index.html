@@ -62,8 +62,8 @@
       align-items: center;
       flex-wrap: wrap;
     }
-    input[type="search"], input[type="file"], input[type="date"] {
-      flex: 1 1 280px;
+    input[type="search"], input[type="file"], input[type="date"], select {
+      flex: 1 1 220px;
       min-width: 0;
       padding: 12px 14px;
       border: 1px solid var(--line);
@@ -231,6 +231,27 @@
       color: var(--red);
       font-weight: 700;
     }
+    .market-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+    .market-main {
+      font-weight: 700;
+      color: var(--text);
+    }
+    .market-sub {
+      color: var(--muted);
+    }
+    .market-up {
+      color: var(--red);
+      font-weight: 700;
+    }
+    .market-down {
+      color: var(--green);
+      font-weight: 700;
+    }
     .open-link {
       color: var(--red);
       font-weight: 700;
@@ -360,7 +381,13 @@
 
     <section class="panel">
       <form method="get" class="toolbar">
-        <input type="search" name="q" value="{{ search }}" placeholder="搜索品种、代码、主力合约、日期">
+        <input type="search" name="q" value="{{ search }}" placeholder="搜索品种、代码、主力合约">
+        <select name="date">
+          <option value="">最新日期</option>
+          {% for d in trade_dates %}
+          <option value="{{ d }}" {% if d == trade_date %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select>
         <button type="submit">搜索</button>
         <a class="link-button secondary" href="/">清空</a>
       </form>
@@ -377,6 +404,8 @@
             <tr>
               <th>品种</th>
               <th>主力合约</th>
+              <th>日行情</th>
+              <th>量仓</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -390,6 +419,26 @@
                 </div>
               </td>
               <td><span class="contract-tag">{{ item.contract_code }}</span></td>
+              <td>
+                {% if item.close_price is not none %}
+                <div class="market-cell">
+                  <span class="market-main">收 {{ "%.2f"|format(item.close_price) }} / 结 {{ "%.2f"|format(item.settlement_price) }}</span>
+                  <span class="{% if item.close_change > 0 %}market-up{% elif item.close_change < 0 %}market-down{% else %}market-sub{% endif %}">收涨跌 {{ "%+.2f"|format(item.close_change) }}</span>
+                </div>
+                {% else %}
+                <span class="market-sub">暂无日行情</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if item.volume is not none %}
+                <div class="market-cell">
+                  <span class="market-main">成交 {{ "{:,}".format(item.volume) }}</span>
+                  <span class="market-sub">持仓 {{ "{:,}".format(item.open_interest) }}</span>
+                </div>
+                {% else %}
+                <span class="market-sub">—</span>
+                {% endif %}
+              </td>
               <td><a class="open-link" href="/contract/{{ item.exchange }}/{{ item.product_code }}?date={{ item.trade_date }}">打开</a></td>
             </tr>
             {% endfor %}
