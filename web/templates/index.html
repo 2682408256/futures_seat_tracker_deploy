@@ -373,14 +373,20 @@
         {% for alert in home_capital_alerts %}
         <li>
           <a class="home-alert-item home-alert-link" href="/contract/{{ alert.exchange }}/{{ alert.product_code }}?date={{ alert.trade_date }}">
-            <span class="home-alert-level">{{ alert.level }}</span>
-            <span><strong>{{ alert.product_name }}</strong> {{ alert.contract_code }}：{{ alert.message }}</span>
+            <span class="home-alert-level">综合</span>
+            <span>
+              <strong>{{ alert.product_name }}</strong> {{ alert.contract_code }}：{{ alert.composite_signal.summary }}
+              <br>
+              <span class="helper-text">量价关系：{{ alert.market_signal.summary }}</span>
+              <br>
+              <span class="helper-text">机构/散户：{{ alert.behavior_signal.summary }}</span>
+            </span>
           </a>
         </li>
         {% endfor %}
       </ul>
       {% else %}
-      <div class="helper-text">暂无明显重大异动。</div>
+      <div class="helper-text">暂无可判断的量价与席位结构信号。</div>
       {% endif %}
     </section>
 

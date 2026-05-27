@@ -53,6 +53,17 @@ RETAIL_MEMBERS = [
     "中信建投",
 ]
 
+PRICE_VOLUME_OI_RULES = {
+    ("上涨", "增加", "增加"): ("增量上涨", "新资金推动，多头趋势偏强。"),
+    ("上涨", "增加", "减少"): ("放量减仓上涨", "上涨更多来自空头回补或短线挤仓，走势强但波动也会放大。"),
+    ("上涨", "减少", "增加"): ("缩量增仓上涨", "上涨中持仓继续累积，但跟风成交不足，说明分歧在加大。"),
+    ("上涨", "减少", "减少"): ("缩量减仓上涨", "上涨更像修复或被动上行，持续性要继续观察。"),
+    ("下跌", "增加", "增加"): ("增量下跌", "新资金推动下跌，空头趋势偏强。"),
+    ("下跌", "增加", "减少"): ("放量减仓下跌", "下跌更多来自多头止损或情绪宣泄，短期容易剧烈波动。"),
+    ("下跌", "减少", "增加"): ("缩量增仓下跌", "下跌过程中空头仓位继续累积，说明空方在持续施压。"),
+    ("下跌", "减少", "减少"): ("缩量减仓下跌", "下跌更像存量资金撤退，走势可能逐步钝化。"),
+}
+
 
 @dataclass(frozen=True)
 class ContractIndexItem:
@@ -79,15 +90,22 @@ class ContractNavItem:
 
 
 @dataclass(frozen=True)
+class ConditionSignal:
+    title: str
+    summary: str
+    details: list[str]
+
+
+@dataclass(frozen=True)
 class HomeCapitalAlert:
     exchange: str
     product_code: str
     product_name: str
     trade_date: str
     contract_code: str
-    level: str
-    message: str
-    score: int
+    market_signal: ConditionSignal
+    behavior_signal: ConditionSignal
+    composite_signal: ConditionSignal
 
 
 @dataclass(frozen=True)
@@ -117,7 +135,9 @@ class ContractDetailData:
     institutional_series: list[dict[str, object]]
     institutional_excluding_dongzheng_series: list[dict[str, object]]
     retail_series: list[dict[str, object]]
-    capital_alerts: list[str]
+    market_signal: ConditionSignal
+    behavior_signal: ConditionSignal
+    composite_signal: ConditionSignal
     switches: list[dict[str, object]]
     weighted_placeholder: str
 
@@ -300,16 +320,9 @@ class DashboardQueries:
             _, switch_events = get_dominant_switches(self.db_path, exchange, product_code)
             contract_code = dominant.contract_code
 
-        capital_alerts = self._build_capital_alerts(
-            exchange,
-            product_code,
-            trade_date,
-            contract_code,
-            institutional_rows,
-            retail_rows,
-            institutional_series,
-            retail_series,
-        )
+        market_signal = self._build_market_structure_signal(exchange, product_code, trade_date, contract_code)
+        behavior_signal = self._build_behavior_signal(institutional_rows, retail_rows, market_signal)
+        composite_signal = self._build_composite_signal(market_signal, behavior_signal)
 
         return ContractDetailData(
             exchange=exchange,
@@ -325,7 +338,9 @@ class DashboardQueries:
             institutional_series=institutional_series,
             institutional_excluding_dongzheng_series=institutional_excluding_dongzheng_series,
             retail_series=retail_series,
-            capital_alerts=capital_alerts,
+            market_signal=market_signal,
+            behavior_signal=behavior_signal,
+            composite_signal=composite_signal,
             switches=[
                 {
                     "prev_trade_date": event.prev_trade_date,
@@ -369,51 +384,22 @@ class DashboardQueries:
             contract_code = "" if item.exchange == "czce" else item.contract_code
             inst_rows = self._build_member_rows(item.exchange, item.trade_date, item.product_code, contract_code, INSTITUTIONAL_MEMBERS)
             ret_rows = self._build_member_rows(item.exchange, item.trade_date, item.product_code, contract_code, RETAIL_MEMBERS)
-            inst_change = sum(row.net_change for row in inst_rows)
-            ret_change = sum(row.net_change for row in ret_rows)
-            active_inst = [row for row in inst_rows if row.net_change != 0]
-            pos = sum(1 for row in active_inst if row.net_change > 0)
-            neg = sum(1 for row in active_inst if row.net_change < 0)
-            total = len(active_inst)
-            score = abs(inst_change)
-            level = "异动"
-            parts: list[str] = []
-            if inst_change:
-                direction = "增加" if inst_change > 0 else "减少"
-                parts.append(f"机构净持仓{direction} {abs(inst_change):,} 手")
-            if inst_change * ret_change < 0:
-                inst_dir = "增多" if inst_change > 0 else "减多"
-                ret_dir = "增多" if ret_change > 0 else "减多"
-                level = "分歧"
-                score += abs(ret_change)
-                parts.append(f"机构{inst_dir}、散户{ret_dir}")
-            if total >= 3:
-                if max(pos, neg) / total >= 0.7:
-                    direction = "增多" if pos > neg else "减多"
-                    level = "主力统一" if level == "异动" else level
-                    score += 20000
-                    parts.append(f"{max(pos, neg)}/{total} 个机构席位同步{direction}")
-                elif pos >= 2 and neg >= 2:
-                    level = "主力分歧" if level == "异动" else level
-                    score += 20000
-                    parts.append(f"{pos} 个席位增多、{neg} 个席位减多")
-            if abs(inst_change) >= 10000:
-                level = "强异动" if level == "异动" else level
-                score += 30000
-            if parts and score >= 5000:
-                alerts.append(
-                    HomeCapitalAlert(
-                        exchange=item.exchange,
-                        product_code=item.product_code,
-                        product_name=item.product_name,
-                        trade_date=item.trade_date,
-                        contract_code=item.contract_code,
-                        level=level,
-                        message="；".join(parts),
-                        score=score,
-                    )
+            market_signal = self._build_market_structure_signal(item.exchange, item.product_code, item.trade_date, item.contract_code)
+            behavior_signal = self._build_behavior_signal(inst_rows, ret_rows, market_signal)
+            composite_signal = self._build_composite_signal(market_signal, behavior_signal)
+            alerts.append(
+                HomeCapitalAlert(
+                    exchange=item.exchange,
+                    product_code=item.product_code,
+                    product_name=item.product_name,
+                    trade_date=item.trade_date,
+                    contract_code=item.contract_code,
+                    market_signal=market_signal,
+                    behavior_signal=behavior_signal,
+                    composite_signal=composite_signal,
                 )
-        alerts.sort(key=lambda a: (-a.score, a.product_name))
+            )
+        alerts.sort(key=lambda a: (0 if a.composite_signal.summary != "结构混合，暂不下明确方向结论。" else 1, a.product_name))
         return alerts[:limit]
 
     def _normalize_trade_date(self, value: str) -> str:
@@ -444,18 +430,41 @@ class DashboardQueries:
     def _get_daily_market_summary(
         self, exchange: str, trade_date: str, contract_code: str
     ) -> tuple[float | None, float | None, float | None, float | None, int | None, int | None]:
+        snapshot = self._get_daily_market_snapshot(exchange, trade_date, contract_code)
+        if not snapshot:
+            return None, None, None, None, None, None
+        return (
+            snapshot["close_price"],
+            snapshot["settlement_price"],
+            snapshot["close_change"],
+            snapshot["settlement_change"],
+            snapshot["volume"],
+            snapshot["open_interest"],
+        )
+
+    def _get_daily_market_snapshot(self, exchange: str, trade_date: str, contract_code: str) -> dict[str, object] | None:
+        if not contract_code or contract_code == "品种汇总":
+            return None
         with self.database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT close_price, settlement_price, close_change, settlement_change, volume, open_interest
+                SELECT close_price, settlement_price, close_change, settlement_change, volume, open_interest, open_interest_change
                 FROM daily_markets
                 WHERE trade_date = ? AND exchange = ? AND contract_code = ?
                 """,
                 (trade_date, exchange, contract_code),
             ).fetchone()
         if not row:
-            return None, None, None, None, None, None
-        return row[0], row[1], row[2], row[3], row[4], row[5]
+            return None
+        return {
+            "close_price": row[0],
+            "settlement_price": row[1],
+            "close_change": row[2],
+            "settlement_change": row[3],
+            "volume": int(row[4]) if row[4] is not None else None,
+            "open_interest": int(row[5]) if row[5] is not None else None,
+            "open_interest_change": int(row[6]) if row[6] is not None else None,
+        }
 
     def _get_adjacent_items(
         self,
@@ -524,105 +533,265 @@ class DashboardQueries:
             for index, trade_date in enumerate(available_dates)
         ]
 
-    def _build_capital_alerts(
+    def _build_market_structure_signal(
         self,
         exchange: str,
         product_code: str,
         trade_date: str,
         contract_code: str,
+    ) -> ConditionSignal:
+        current = self._get_daily_market_snapshot(exchange, trade_date, contract_code)
+        previous_date = self._get_previous_trade_date(exchange, product_code, trade_date)
+        previous = self._get_daily_market_snapshot(exchange, previous_date, contract_code) if previous_date else None
+        if not current or not previous:
+            return ConditionSignal(
+                title="量价关系判断",
+                summary="条件不足，暂时无法完成量价关系归类。",
+                details=["当前合约缺少完整的当日或上一交易日日行情数据。"],
+            )
+
+        price_direction = self._price_direction(current)
+        volume_direction = self._compare_direction(current.get("volume"), previous.get("volume"))
+        oi_direction = self._open_interest_direction(current, previous)
+        combo = PRICE_VOLUME_OI_RULES.get((price_direction, volume_direction, oi_direction))
+        if not combo:
+            return ConditionSignal(
+                title="量价关系判断",
+                summary="条件不足或方向不明确，暂不强行归入固定量价组合。",
+                details=[
+                    f"价格：{price_direction}",
+                    f"成交量：{volume_direction}",
+                    f"持仓量：{oi_direction}",
+                ],
+            )
+        label, meaning = combo
+        return ConditionSignal(
+            title="量价关系判断",
+            summary=f"{label}：{meaning}",
+            details=[
+                f"价格：{price_direction}",
+                f"成交量：{volume_direction}",
+                f"持仓量：{oi_direction}",
+                f"组合：{label}",
+                f"含义：{meaning}",
+            ],
+        )
+
+    def _build_behavior_signal(
+        self,
         institutional_rows: list[MemberNetRow],
         retail_rows: list[MemberNetRow],
-        institutional_series: list[dict[str, object]],
-        retail_series: list[dict[str, object]],
-    ) -> list[str]:
-        alerts: list[str] = []
-        inst_current, inst_previous, inst_avg = self._series_change_stats(institutional_series, trade_date)
-        retail_current, retail_previous, retail_avg = self._series_change_stats(retail_series, trade_date)
-        if inst_current is not None and inst_previous is not None:
-            inst_change = inst_current - inst_previous
-            if inst_avg > 0 and abs(inst_change) >= inst_avg * 2:
-                direction = "增加" if inst_change > 0 else "减少"
-                alerts.append(
-                    f"机构阵营净持仓较上一交易日{direction} {abs(inst_change):,} 手，约为近20日平均变化的 {abs(inst_change) / inst_avg:.1f} 倍。"
-                )
-            elif inst_previous and abs(inst_change / inst_previous) >= 0.2:
-                direction = "增加" if inst_change > 0 else "减少"
-                alerts.append(f"机构阵营净持仓较上一交易日{direction} {abs(inst_change):,} 手，变化幅度超过 20%。")
-        if inst_current is not None and inst_previous is not None and retail_current is not None and retail_previous is not None:
-            inst_change = inst_current - inst_previous
-            retail_change = retail_current - retail_previous
-            if inst_change * retail_change < 0:
-                inst_direction = "增多" if inst_change > 0 else "减多"
-                retail_direction = "增多" if retail_change > 0 else "减多"
-                alerts.append(f"机构阵营{inst_direction}、散户阵营{retail_direction}，阵营方向出现背离。")
-        member_alert = self._build_member_change_alert(exchange, product_code, trade_date, contract_code, institutional_rows)
-        if member_alert:
-            alerts.append(member_alert)
-        consensus_alert = self._build_consensus_alert(institutional_rows)
-        if consensus_alert:
-            alerts.append(consensus_alert)
-        if not alerts:
-            alerts.append("暂无明显资金异动，机构席位变化整体处于正常范围。")
-        return alerts
-
-    def _series_change_stats(self, series: list[dict[str, object]], trade_date: str) -> tuple[int | None, int | None, float]:
-        index = next((i for i, item in enumerate(series) if item["trade_date"] == trade_date), -1)
-        if index <= 0:
-            return None, None, 0.0
-        current = int(series[index]["net_position"])
-        previous = int(series[index - 1]["net_position"])
-        changes = [
-            abs(int(series[i]["net_position"]) - int(series[i - 1]["net_position"]))
-            for i in range(max(1, index - 19), index + 1)
+        market_signal: ConditionSignal,
+    ) -> ConditionSignal:
+        inst = self._group_profile(institutional_rows, "机构")
+        retail = self._group_profile(retail_rows, "散户")
+        oi_contracting = "持仓量：减少" in market_signal.details
+        details = [
+            f"机构立场：{inst['stance_label']}",
+            f"机构行为：{inst['action_label']}",
+            f"散户立场：{retail['stance_label']}",
+            f"散户行为：{retail['action_label']}",
         ]
-        average = sum(changes) / len(changes) if changes else 0.0
-        return current, previous, average
 
-    def _build_member_change_alert(
+        if inst["stance"] == "net_long" and retail["stance"] == "net_short":
+            if retail["action"] in {"reduce_short", "increase_long", "both_reduce"} and oi_contracting:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="散户空头开始止损回补，对手盘燃料在衰减，需警惕上涨进入后段。",
+                    details=details + ["解释：原有机构多、散户空的结构开始松动，持仓同步收缩。"],
+                )
+            if inst["action"] in {"increase_long", "reduce_short", "both_add"} and retail["action"] in {"increase_short", "reduce_long", "both_add", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="机构主导做多，散户继续逆势做空，对手盘结构仍在，趋势延续。",
+                    details=details + ["解释：机构仍站在多头主导一侧，散户继续提供空头对手盘。"],
+                )
+            if inst["action"] in {"reduce_long", "increase_short", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="机构仍偏多，但主动推进在放缓。",
+                    details=details + ["解释：机构净多未改，但当日没有继续强化多头。"],
+                )
+            return ConditionSignal(
+                title="机构/散户行为判断",
+                summary="机构仍主导多头，散户仍站在空头对手盘，趋势暂未破坏。",
+                details=details + ["解释：虽然当日动作不完全标准，但主导方向仍是机构多、散户空。"],
+            )
+
+        if inst["stance"] == "net_short" and retail["stance"] == "net_long":
+            if retail["action"] in {"reduce_long", "increase_short", "both_reduce"} and oi_contracting:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="散户多头开始止损离场，对手盘燃料在衰减，需警惕下跌进入后段。",
+                    details=details + ["解释：原有机构空、散户多的结构开始松动，持仓同步收缩。"],
+                )
+            if inst["action"] in {"increase_short", "reduce_long", "both_add"} and retail["action"] in {"increase_long", "reduce_short", "both_add", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="机构主导做空，散户逆势承接多头，对手盘结构仍在，跌势延续。",
+                    details=details + ["解释：机构仍站在空头主导一侧，散户继续提供多头对手盘。"],
+                )
+            if inst["action"] in {"reduce_short", "increase_long", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="机构仍偏空，但主动推进在放缓。",
+                    details=details + ["解释：机构净空未改，但当日没有继续强化空头。"],
+                )
+            return ConditionSignal(
+                title="机构/散户行为判断",
+                summary="机构仍主导空头，散户仍站在多头对手盘，趋势暂未破坏。",
+                details=details + ["解释：虽然当日动作不完全标准，但主导方向仍是机构空、散户多。"],
+            )
+
+        if inst["stance"] == retail["stance"] and inst["stance"] != "neutral":
+            direction = "做多" if inst["stance"] == "net_long" else "做空"
+            if inst["action"] in {"increase_long", "increase_short", "both_add"} and retail["action"] in {"increase_long", "increase_short", "both_add"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary=f"机构与散户同向{direction}并同步加仓，属于一致性强趋势或事件驱动结构。",
+                    details=details + ["解释：这不是常规的机构吃散户，而是顺向资金共振。"],
+                )
+            if inst["action"] in {"reduce_long", "reduce_short", "both_reduce"} and retail["action"] in {"reduce_long", "reduce_short", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary="机构与散户同向但都在减仓，原趋势可能进入钝化或整理阶段。",
+                    details=details + ["解释：顺向持仓还在，但双方都没有继续强化原方向。"],
+                )
+            if inst["action"] in {"increase_long", "increase_short", "both_add"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary=f"机构仍主导{direction}，但散户没有同步强化，当前更像机构单边推动。",
+                    details=details + ["解释：方向仍由机构主导，只是散户没有形成同步共振。"],
+                )
+            if inst["action"] in {"reduce_long", "reduce_short", "both_reduce"}:
+                return ConditionSignal(
+                    title="机构/散户行为判断",
+                    summary=f"机构与散户同向{direction}，但机构也在收缩仓位，趋势推进开始放缓。",
+                    details=details + ["解释：虽然方向一致，但主导资金没有继续强化原方向。"],
+                )
+
+        if inst["stance"] == "net_long" and inst["action"] in {"reduce_long", "increase_short", "both_reduce"}:
+            return ConditionSignal(
+                title="机构/散户行为判断",
+                summary="机构仍偏多，但推进力度在减弱。",
+                details=details + ["解释：机构主导方向未变，但当日行为开始反着多头主导方向走。"],
+            )
+        if inst["stance"] == "net_short" and inst["action"] in {"reduce_short", "increase_long", "both_reduce"}:
+            return ConditionSignal(
+                title="机构/散户行为判断",
+                summary="机构仍偏空，但推进力度在减弱。",
+                details=details + ["解释：机构主导方向未变，但当日行为开始反着空头主导方向走。"],
+            )
+        return ConditionSignal(
+            title="机构/散户行为判断",
+            summary="机构与散户结构混合，暂不下明确方向结论。",
+            details=details + ["解释：当前席位结构没有落入清晰的主导延续、顺向共振或燃料衰减场景。"],
+        )
+
+    def _build_composite_signal(
         self,
-        exchange: str,
-        product_code: str,
-        trade_date: str,
-        contract_code: str,
-        institutional_rows: list[MemberNetRow],
-    ) -> str:
-        available_dates = list(reversed(self._get_available_dates(exchange, product_code)))
-        current_index = available_dates.index(trade_date) if trade_date in available_dates else -1
-        if current_index <= 0:
-            return ""
-        strongest_row = max(institutional_rows, key=lambda row: abs(row.net_change), default=None)
-        if strongest_row is None or strongest_row.net_change == 0:
-            return ""
-        history: list[int] = []
-        for date in available_dates[max(0, current_index - 20):current_index]:
-            current_contract_code = contract_code
-            if exchange != "czce":
-                dominant = get_dominant_contract(self.db_path, exchange, date, product_code)
-                if dominant is None:
-                    continue
-                current_contract_code = dominant.contract_code
-            rows = self._build_member_rows(exchange, date, product_code, current_contract_code if exchange != "czce" else "", [strongest_row.member_label])
-            if rows:
-                history.append(abs(rows[0].net_change))
-        average = sum(history) / len(history) if history else 0.0
-        if average > 0 and abs(strongest_row.net_change) >= average * 2:
-            direction = "增加" if strongest_row.net_change > 0 else "减少"
-            return f"{strongest_row.member_label} 净持仓{direction} {abs(strongest_row.net_change):,} 手，约为近20日平均变化的 {abs(strongest_row.net_change) / average:.1f} 倍。"
-        return ""
+        market_signal: ConditionSignal,
+        behavior_signal: ConditionSignal,
+    ) -> ConditionSignal:
+        market_summary = market_signal.summary
+        behavior_summary = behavior_signal.summary
+        if "趋势延续" in behavior_summary or "跌势延续" in behavior_summary:
+            summary = f"{market_summary}{behavior_summary}"
+        elif "止损" in behavior_summary or "后段" in behavior_summary:
+            summary = f"{market_summary}{behavior_summary}"
+        elif "同步加仓" in behavior_summary:
+            summary = f"{market_summary}{behavior_summary}"
+        elif "推进力度在减弱" in behavior_summary:
+            summary = f"{market_summary}{behavior_summary}"
+        elif "机构仍主导" in behavior_summary or "机构与散户同向但都在减仓" in behavior_summary:
+            summary = f"{market_summary}{behavior_summary}"
+        else:
+            summary = "结构混合，暂不下明确方向结论。"
+        return ConditionSignal(
+            title="综合判断",
+            summary=summary,
+            details=[
+                f"量价关系：{market_signal.summary}",
+                f"机构/散户：{behavior_signal.summary}",
+            ],
+        )
 
-    def _build_consensus_alert(self, institutional_rows: list[MemberNetRow]) -> str:
-        active_rows = [row for row in institutional_rows if row.net_change != 0]
-        if len(active_rows) < 3:
-            return ""
-        positive_count = sum(1 for row in active_rows if row.net_change > 0)
-        negative_count = sum(1 for row in active_rows if row.net_change < 0)
-        total = len(active_rows)
-        if max(positive_count, negative_count) / total >= 0.7:
-            direction = "增多" if positive_count > negative_count else "减多"
-            return f"主力意见较统一：{max(positive_count, negative_count)}/{total} 个机构席位同步{direction}。"
-        if positive_count >= 2 and negative_count >= 2:
-            return f"主力产生分歧：{positive_count} 个机构席位增多，{negative_count} 个机构席位减多。"
-        return ""
+    def _get_previous_trade_date(self, exchange: str, product_code: str, trade_date: str) -> str | None:
+        available_dates = list(reversed(self._get_available_dates(exchange, product_code)))
+        if trade_date not in available_dates:
+            return None
+        index = available_dates.index(trade_date)
+        if index <= 0:
+            return None
+        return available_dates[index - 1]
+
+    def _price_direction(self, snapshot: dict[str, object]) -> str:
+        change = float(snapshot.get("close_change") or 0)
+        if change > 0:
+            return "上涨"
+        if change < 0:
+            return "下跌"
+        return "不明确"
+
+    def _compare_direction(self, current: object, previous: object) -> str:
+        if current is None or previous is None:
+            return "不明确"
+        if current > previous:
+            return "增加"
+        if current < previous:
+            return "减少"
+        return "不明确"
+
+    def _open_interest_direction(self, current: dict[str, object], previous: dict[str, object]) -> str:
+        oi_change = current.get("open_interest_change")
+        if isinstance(oi_change, int):
+            if oi_change > 0:
+                return "增加"
+            if oi_change < 0:
+                return "减少"
+        return self._compare_direction(current.get("open_interest"), previous.get("open_interest"))
+
+    def _group_profile(self, rows: list[MemberNetRow], group_name: str) -> dict[str, str]:
+        net_position = sum(row.net_position for row in rows)
+        long_change = sum(row.long_change for row in rows)
+        short_change = sum(row.short_change for row in rows)
+        if net_position > 0:
+            stance = "net_long"
+            stance_label = f"{group_name}净多"
+        elif net_position < 0:
+            stance = "net_short"
+            stance_label = f"{group_name}净空"
+        else:
+            stance = "neutral"
+            stance_label = f"{group_name}中性"
+
+        if long_change > 0 and short_change <= 0:
+            action = "increase_long"
+            action_label = "增多"
+        elif long_change < 0 and short_change >= 0:
+            action = "reduce_long"
+            action_label = "减多"
+        elif short_change > 0 and long_change <= 0:
+            action = "increase_short"
+            action_label = "增空"
+        elif short_change < 0 and long_change >= 0:
+            action = "reduce_short"
+            action_label = "减空"
+        elif long_change > 0 and short_change > 0:
+            action = "both_add"
+            action_label = "多空同增"
+        elif long_change < 0 and short_change < 0:
+            action = "both_reduce"
+            action_label = "多空同减"
+        else:
+            action = "mixed"
+            action_label = "混合"
+        return {
+            "stance": stance,
+            "stance_label": stance_label,
+            "action": action,
+            "action_label": action_label,
+        }
 
     def _build_member_rows(
         self,

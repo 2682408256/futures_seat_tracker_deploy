@@ -326,10 +326,25 @@
     </section>
 
     <section class="panel capital-alerts">
-      <h2>资金异动提示</h2>
+      <h2>量价关系判断</h2>
+      <div class="helper-text">{{ detail.market_signal.summary }}</div>
       <ul class="alert-list">
-        {% for alert in detail.capital_alerts %}
-        <li>{{ alert }}</li>
+        {% for line in detail.market_signal.details %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      <h2>机构/散户行为判断</h2>
+      <div class="helper-text">{{ detail.behavior_signal.summary }}</div>
+      <ul class="alert-list">
+        {% for line in detail.behavior_signal.details %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      <h2>综合判断</h2>
+      <div class="helper-text">{{ detail.composite_signal.summary }}</div>
+      <ul class="alert-list">
+        {% for line in detail.composite_signal.details %}
+        <li>{{ line }}</li>
         {% endfor %}
       </ul>
     </section>
