@@ -32,6 +32,10 @@ DCE_PRODUCT_NAMES = {
     "Y": "豆油",
 }
 
+PRODUCT_NAME_OVERRIDES = {
+    "NR": "20号胶",
+}
+
 INSTITUTIONAL_MEMBERS = [
     "东证期货",
     "永安期货",
@@ -418,8 +422,11 @@ class DashboardQueries:
         return [row[0] for row in rows]
 
     def _resolve_product_name(self, exchange: str, product_code: str) -> str:
+        normalized_code = product_code.upper()
         if exchange == "dce":
-            return DCE_PRODUCT_NAMES.get(product_code.upper(), product_code)
+            return DCE_PRODUCT_NAMES.get(normalized_code, product_code)
+        if normalized_code in PRODUCT_NAME_OVERRIDES:
+            return PRODUCT_NAME_OVERRIDES[normalized_code]
         with self.database.connect() as connection:
             row = connection.execute(
                 "select product_name from totals where exchange = ? and product_code = ? and product_name != '' limit 1",
