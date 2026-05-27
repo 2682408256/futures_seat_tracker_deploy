@@ -233,13 +233,24 @@ class DashboardQueries:
                 return None
             institutional_rows = self._build_member_rows(exchange, trade_date, product_code, dominant.contract_code, INSTITUTIONAL_MEMBERS)
             retail_rows = self._build_member_rows(exchange, trade_date, product_code, dominant.contract_code, RETAIL_MEMBERS)
-            institutional_series = self._build_group_series(exchange, product_code, INSTITUTIONAL_MEMBERS)
+            institutional_series = self._build_group_series(
+                exchange,
+                product_code,
+                INSTITUTIONAL_MEMBERS,
+                contract_code=dominant.contract_code,
+            )
             institutional_excluding_dongzheng_series = self._build_group_series(
                 exchange,
                 product_code,
                 INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG,
+                contract_code=dominant.contract_code,
             )
-            retail_series = self._build_group_series(exchange, product_code, RETAIL_MEMBERS)
+            retail_series = self._build_group_series(
+                exchange,
+                product_code,
+                RETAIL_MEMBERS,
+                contract_code=dominant.contract_code,
+            )
             _, switch_events = get_dominant_switches(self.db_path, exchange, product_code)
             contract_code = dominant.contract_code
 
