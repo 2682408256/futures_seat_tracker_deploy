@@ -218,14 +218,42 @@ class DashboardQueries:
         if exchange == "czce":
             institutional_rows = self._build_member_rows(exchange, trade_date, product_code, "", INSTITUTIONAL_MEMBERS)
             retail_rows = self._build_member_rows(exchange, trade_date, product_code, "", RETAIL_MEMBERS)
-            institutional_series = self._build_group_series(exchange, product_code, INSTITUTIONAL_MEMBERS, contract_code="")
+            institutional_total = sum(row.net_position for row in institutional_rows)
+            institutional_excluding_dongzheng_total = sum(
+                row.net_position
+                for row in self._build_member_rows(
+                    exchange,
+                    trade_date,
+                    product_code,
+                    "",
+                    INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG,
+                )
+            )
+            retail_total = sum(row.net_position for row in retail_rows)
+            institutional_series = self._build_group_series(
+                exchange,
+                product_code,
+                INSTITUTIONAL_MEMBERS,
+                trade_date,
+                institutional_total,
+                contract_code="",
+            )
             institutional_excluding_dongzheng_series = self._build_group_series(
                 exchange,
                 product_code,
                 INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG,
+                trade_date,
+                institutional_excluding_dongzheng_total,
                 contract_code="",
             )
-            retail_series = self._build_group_series(exchange, product_code, RETAIL_MEMBERS, contract_code="")
+            retail_series = self._build_group_series(
+                exchange,
+                product_code,
+                RETAIL_MEMBERS,
+                trade_date,
+                retail_total,
+                contract_code="",
+            )
             switch_events: list = []
             contract_code = dominant.contract_code if dominant is not None else "品种汇总"
         else:
@@ -233,22 +261,40 @@ class DashboardQueries:
                 return None
             institutional_rows = self._build_member_rows(exchange, trade_date, product_code, dominant.contract_code, INSTITUTIONAL_MEMBERS)
             retail_rows = self._build_member_rows(exchange, trade_date, product_code, dominant.contract_code, RETAIL_MEMBERS)
+            institutional_total = sum(row.net_position for row in institutional_rows)
+            institutional_excluding_dongzheng_total = sum(
+                row.net_position
+                for row in self._build_member_rows(
+                    exchange,
+                    trade_date,
+                    product_code,
+                    dominant.contract_code,
+                    INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG,
+                )
+            )
+            retail_total = sum(row.net_position for row in retail_rows)
             institutional_series = self._build_group_series(
                 exchange,
                 product_code,
                 INSTITUTIONAL_MEMBERS,
+                trade_date,
+                institutional_total,
                 contract_code=dominant.contract_code,
             )
             institutional_excluding_dongzheng_series = self._build_group_series(
                 exchange,
                 product_code,
                 INSTITUTIONAL_MEMBERS_EXCLUDING_DONGZHENG,
+                trade_date,
+                institutional_excluding_dongzheng_total,
                 contract_code=dominant.contract_code,
             )
             retail_series = self._build_group_series(
                 exchange,
                 product_code,
                 RETAIL_MEMBERS,
+                trade_date,
+                retail_total,
                 contract_code=dominant.contract_code,
             )
             _, switch_events = get_dominant_switches(self.db_path, exchange, product_code)
@@ -441,11 +487,16 @@ class DashboardQueries:
         exchange: str,
         product_code: str,
         labels: Iterable[str],
+        anchor_trade_date: str,
+        anchor_net_position: int,
         contract_code: str | None = None,
     ) -> list[dict[str, object]]:
-        series: list[dict[str, object]] = []
-        available_dates = self._get_available_dates(exchange, product_code)
-        for trade_date in reversed(available_dates):
+        available_dates = list(reversed(self._get_available_dates(exchange, product_code)))
+        if anchor_trade_date not in available_dates:
+            return []
+
+        daily_changes: dict[str, int] = {}
+        for trade_date in available_dates:
             current_contract_code = contract_code
             if current_contract_code is None:
                 dominant = get_dominant_contract(self.db_path, exchange, trade_date, product_code)
@@ -453,13 +504,25 @@ class DashboardQueries:
                     continue
                 current_contract_code = dominant.contract_code
             rows = self._build_member_rows(exchange, trade_date, product_code, current_contract_code, labels)
-            series.append(
-                {
-                    "trade_date": trade_date,
-                    "net_position": sum(row.net_position for row in rows),
-                }
-            )
-        return series
+            daily_changes[trade_date] = sum(row.net_change for row in rows)
+
+        anchor_index = available_dates.index(anchor_trade_date)
+        net_positions = [0] * len(available_dates)
+        net_positions[anchor_index] = anchor_net_position
+
+        for index in range(anchor_index + 1, len(available_dates)):
+            net_positions[index] = net_positions[index - 1] + daily_changes.get(available_dates[index], 0)
+        for index in range(anchor_index - 1, -1, -1):
+            next_trade_date = available_dates[index + 1]
+            net_positions[index] = net_positions[index + 1] - daily_changes.get(next_trade_date, 0)
+
+        return [
+            {
+                "trade_date": trade_date,
+                "net_position": net_positions[index],
+            }
+            for index, trade_date in enumerate(available_dates)
+        ]
 
     def _build_capital_alerts(
         self,
